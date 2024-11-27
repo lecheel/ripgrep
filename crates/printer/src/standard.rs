@@ -56,6 +56,7 @@ struct Config {
     separator_field_context: Arc<Vec<u8>>,
     separator_path: Option<u8>,
     path_terminator: Option<u8>,
+    fte_style: bool,
 }
 
 impl Default for Config {
@@ -82,6 +83,7 @@ impl Default for Config {
             separator_field_context: Arc::new(b"-".to_vec()),
             separator_path: None,
             path_terminator: None,
+            fte_style: false,
         }
     }
 }
@@ -472,6 +474,12 @@ impl StandardBuilder {
         terminator: Option<u8>,
     ) -> &mut StandardBuilder {
         self.config.path_terminator = terminator;
+        self
+    }
+
+    /// Whether to show full paths (includes current directory).
+    pub fn fte_style(&mut self, yes: bool) -> &mut StandardBuilder {
+        self.config.fte_style = yes;
         self
     }
 }
@@ -1160,17 +1168,9 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
                         self.sunk.line_number().map(|n| n + count),
                         Some(m.start() as u64 + 1),
                     )?;
-
-                    let this_line = line.with_end(upto);
+                    self.write_spec(spec, &bytes[line.with_end(upto)])?;
                     line = line.with_start(upto);
-                    if self.exceeds_max_columns(&bytes[this_line]) {
-                        self.write_exceeded_line(
-                            bytes, this_line, matches, &mut midx,
-                        )?;
-                    } else {
-                        self.write_spec(spec, &bytes[this_line])?;
-                        self.write_line_term()?;
-                    }
+                    self.write_line_term()?;
                 }
             }
             count += 1;
@@ -1203,32 +1203,18 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
                 self.trim_ascii_prefix(bytes, &mut line);
                 if self.exceeds_max_columns(&bytes[line]) {
                     self.write_exceeded_line(bytes, line, &[m], &mut 0)?;
-                    continue;
-                }
-
-                while !line.is_empty() {
-                    if m.end() <= line.start() {
-                        self.write(&bytes[line])?;
-                        line = line.with_start(line.end());
-                    } else if line.start() < m.start() {
-                        let upto = cmp::min(line.end(), m.start());
-                        self.write(&bytes[line.with_end(upto)])?;
-                        line = line.with_start(upto);
-                    } else {
-                        let upto = cmp::min(line.end(), m.end());
-                        self.write_spec(spec, &bytes[line.with_end(upto)])?;
-                        line = line.with_start(upto);
+                } else {
+                    self.write_colored_matches(bytes, line, &[m], &mut 0)?;
+                    self.write_line_term()?;
+                    // It turns out that vimgrep really only wants one line per
+                    // match, even when a match spans multiple lines. So when
+                    // that option is enabled, we just quit after printing the
+                    // first line.
+                    //
+                    // See: https://github.com/BurntSushi/ripgrep/issues/1866
+                    if self.config().per_match_one_line {
+                        break;
                     }
-                }
-                self.write_line_term()?;
-                // It turns out that vimgrep really only wants one line per
-                // match, even when a match spans multiple lines. So when
-                // that option is enabled, we just quit after printing the
-                // first line.
-                //
-                // See: https://github.com/BurntSushi/ripgrep/issues/1866
-                if self.config().per_match_one_line {
-                    break;
                 }
             }
         }
@@ -1335,6 +1321,7 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
             }
 
             let m = matches[*match_index];
+
             if line.start() < m.start() {
                 let upto = cmp::min(line.end(), m.start());
                 self.end_color_match()?;
@@ -1505,6 +1492,13 @@ impl<'a, M: Matcher, W: WriteColor> StandardImpl<'a, M, W> {
     fn write_path(&self, path: &PrinterPath) -> io::Result<()> {
         let mut wtr = self.wtr().borrow_mut();
         wtr.set_color(self.config().colors.path())?;
+        if self.config().fte_style {
+            if let Some(curr_dir) = PrinterPath::get_current_dir_bytes() {
+                wtr.write_all(b"File: ")?;
+                wtr.write_all(&curr_dir)?;
+                wtr.write_all(b"/")?;
+            }
+        }
         wtr.write_all(path.as_bytes())?;
         wtr.reset()
     }
@@ -1794,7 +1788,7 @@ Holmeses, success in the province of detective work must always
 be, to a very large extent, the result of luck. Sherlock Holmes
 can extract a clew from a wisp of straw or a flake of cigar ash;
 but Doctor Watson has to have it taken out for him and dusted,
-and exhibited clearly, with a label attached.\
+and exhibited clearly, with a label attached.
 ";
 
     #[allow(dead_code)]
@@ -1804,7 +1798,7 @@ Holmeses, success in the province of detective work must always\r
 be, to a very large extent, the result of luck. Sherlock Holmes\r
 can extract a clew from a wisp of straw or a flake of cigar ash;\r
 but Doctor Watson has to have it taken out for him and dusted,\r
-and exhibited clearly, with a label attached.\
+and exhibited clearly, with a label attached.
 ";
 
     fn printer_contents(printer: &mut Standard<NoColor<Vec<u8>>>) -> String {
@@ -2917,6 +2911,10 @@ Holmeses, success in the province of detective work must always
 
     #[test]
     fn only_matching_multi_line1() {
+        // The `(?s:.{0})` trick fools the matcher into thinking that it
+        // can match across multiple lines without actually doing so. This is
+        // so we can test multi-line handling in the case of a match on only
+        // one line.
         let matcher =
             RegexMatcher::new(r"(?s:.{0})(Doctor Watsons|Sherlock)").unwrap();
         let mut printer = StandardBuilder::new()
@@ -3260,7 +3258,6 @@ Holmeses, success in the province of detective work must always
         let got = printer_contents(&mut printer);
         let expected = "\
 1:16:For the Doctor Watsons of this world, as opposed to the Sherlock
-2:1:Holmeses, success in the province of detective work must always
 2:58:Holmeses, success in the province of detective work must always
 3:1:be, to a very large extent, the result of luck. Sherlock Holmes
 ";
@@ -3434,8 +3431,7 @@ Holmeses, success in the province of detective work must always
 
     #[test]
     fn replacement_multi_line_diff_line_term() {
-        let matcher = RegexMatcherBuilder::new()
-            .line_terminator(Some(b'\x00'))
+        let matcher = RegexMatcherBuilder::new().line_terminator(Some(b'\x00'))
             .build(r"\n")
             .unwrap();
         let mut printer = StandardBuilder::new()
@@ -3797,7 +3793,11 @@ and xxx clearly, with a label attached.
         SearcherBuilder::new()
             .line_terminator(LineTerminator::crlf())
             .build()
-            .search_reader(&matcher, &b"\n"[..], printer.sink(&matcher))
+            .search_reader(
+                &matcher,
+                &b"\n"[..],
+                printer.sink(&matcher),
+            )
             .unwrap();
 
         let got = printer_contents_ansi(&mut printer);

@@ -356,6 +356,34 @@ impl<'a> PrinterPath<'a> {
         }
         imp(self)
     }
+
+    /// Get the current directory path as bytes, returns None if not available
+    pub(crate) fn get_current_dir_bytes() -> Option<Vec<u8>> {
+        std::env::current_dir()
+            .map(|p| Vec::from_path_lossy(&p).into_owned())
+            .ok()
+    }
+
+    /// Create a new path with current directory prefix
+    pub(crate) fn with_current_dir(path: &'a Path) -> PrinterPath<'a> {
+        let curr_dir = Self::get_current_dir_bytes();
+        let path_bytes = Vec::from_path_lossy(path);
+        
+        let bytes = if let Some(mut dir_bytes) = curr_dir {
+            dir_bytes.extend_from_slice(b"/");
+            dir_bytes.extend_from_slice(&path_bytes);
+            dir_bytes
+        } else {
+            path_bytes.into_owned()
+        };
+
+        PrinterPath {
+            #[cfg(not(unix))]
+            path,
+            bytes: Cow::Owned(bytes),
+            hyperlink: OnceCell::new(),
+        }
+    }
 }
 
 /// A type that provides "nicer" Display and Serialize impls for

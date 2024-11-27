@@ -103,6 +103,7 @@ pub(crate) struct LowArgs {
     pub(crate) stop_on_nonmatch: bool,
     pub(crate) threads: Option<usize>,
     pub(crate) trim: bool,
+    pub(crate) fte: bool,
     pub(crate) type_changes: Vec<TypeChange>,
     pub(crate) unrestricted: usize,
     pub(crate) vimgrep: bool,

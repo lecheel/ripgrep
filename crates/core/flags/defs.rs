@@ -134,6 +134,7 @@ pub(super) const FLAGS: &[&dyn Flag] = &[
     &Threads,
     &Trace,
     &Trim,
+    &Fte,
     &Type,
     &TypeNot,
     &TypeAdd,
@@ -6710,6 +6711,33 @@ fn test_trace() {
 
     let args = parse_low_raw(["--debug", "--trace"]).unwrap();
     assert_eq!(Some(LoggingMode::Trace), args.logging);
+}
+
+#[derive(Debug)]
+struct Fte;
+
+impl Flag for Fte {
+    fn is_switch(&self) -> bool {
+        true
+    }
+    fn name_long(&self) -> &'static str {
+        "fte"
+    }
+    fn doc_category(&self) -> Category {
+        Category::Output
+    }
+    fn doc_short(&self) -> &'static str {
+        r"Print File: fullpath."
+    }
+    fn doc_long(&self) -> &'static str {
+        r"
+Print File: fullpath for each match."
+
+    }
+    fn update(&self, v: FlagValue, args: &mut LowArgs) -> anyhow::Result<()> {
+        args.fte = v.unwrap_switch();
+        Ok(())
+    }
 }
 
 /// --trim

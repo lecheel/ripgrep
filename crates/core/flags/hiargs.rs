@@ -99,6 +99,7 @@ pub(crate) struct HiArgs {
     stop_on_nonmatch: bool,
     threads: usize,
     trim: bool,
+    fte: bool,
     types: ignore::types::Types,
     vimgrep: bool,
     with_filename: bool,
@@ -313,6 +314,7 @@ impl HiArgs {
             stop_on_nonmatch: low.stop_on_nonmatch,
             threads,
             trim: low.trim,
+            fte: low.fte,
             types,
             vimgrep: low.vimgrep,
             with_filename,
@@ -623,7 +625,8 @@ impl HiArgs {
             )
             .separator_path(self.path_separator.clone())
             .stats(self.stats.is_some())
-            .trim_ascii(self.trim);
+            .trim_ascii(self.trim)
+            .fte_style(self.fte);
         // When doing multi-threaded searching, the buffer writer is
         // responsible for writing separators since it is the only thing that
         // knows whether something has been printed or not. But for the single
